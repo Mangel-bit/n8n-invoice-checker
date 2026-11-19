@@ -1,4 +1,4 @@
-// Builds one Claude request per document. Claude only reads and reports what is printed,
+// Builds one AI request per document. The AI only reads and reports what is printed,
 // the checks (math, duplicates, quotes) happen afterwards in code so they're exact.
 const conf = { type: 'string', enum: ['high', 'medium', 'low', 'absent'] };
 const SCHEMA = {
@@ -49,8 +49,8 @@ return $('One item per file').all().map((it) => {
   const file = d.mime === 'application/pdf'
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: d.data } }
     : { type: 'image', source: { type: 'base64', media_type: d.mime, data: d.data } };
-  return { json: { doc_id: d.doc_id, claudeBody: {
-    model: CFG.claudeModel,
+  return { json: { doc_id: d.doc_id, aiBody: {
+    model: CFG.aiModel,
     max_tokens: 4000,
     system: SYSTEM,
     fallbacks: 'default',

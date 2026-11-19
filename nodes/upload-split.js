@@ -1,4 +1,4 @@
-// One item per uploaded file, with the file as base64 so Claude can read it and the page can show it later.
+// One item per uploaded file, with the file as base64 so the AI can read it and the page can show it later.
 const TYPES = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 const item = $input.first();
 const bin = item.binary || {};

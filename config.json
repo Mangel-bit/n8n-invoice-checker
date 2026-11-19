@@ -3,7 +3,7 @@
   "ownerName": "Sam",
   "currency": "USD",
   "testMode": true,
-  "claudeModel": "claude-opus-5-5",
+  "aiModel": "claude-opus-5-5",
   "credentials": {
     "anthropic": {
       "id": "",

@@ -45,12 +45,12 @@ const getWhere = (name, t, key, value, pos) => dt(name, pos, { resource: 'row', 
 const insert = (name, t, pos) => dt(name, pos, { resource: 'row', operation: 'insert', dataTableId: table(t), columns: { mappingMode: 'autoMapInputData', value: null }, options: {} });
 const update = (name, t, key, pos) => dt(name, pos, { resource: 'row', operation: 'update', dataTableId: table(t), matchType: 'allConditions',
   filters: { conditions: [{ keyName: key, condition: 'eq', keyValue: `={{ $json.${key} }}` }] }, columns: { mappingMode: 'autoMapInputData', value: null }, options: {} });
-const claude = (name, pos) => ({ name, type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: pos, onError: 'continueRegularOutput',
+const aiCall = (name, pos) => ({ name, type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: pos, onError: 'continueRegularOutput',
   // Without a credential id in config.json, n8n asks you to pick your Anthropic credential on the node after import.
   ...(CRED.anthropic && CRED.anthropic.id ? { credentials: { anthropicApi: CRED.anthropic } } : {}),
   parameters: { method: 'POST', url: 'https://api.anthropic.com/v1/messages', authentication: 'predefinedCredentialType', nodeCredentialType: 'anthropicApi',
     sendHeaders: true, headerParameters: { parameters: [{ name: 'anthropic-version', value: '2026-10-21' }, { name: 'anthropic-beta', value: 'server-side-fallback-2026-07-01' }] },
-    sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify($json.claudeBody) }}',
+    sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify($json.aiBody) }}',
     options: { batching: { batch: { batchSize: 6, batchInterval: 200 } }, timeout: 180000 } } });
 const webhook = (name, method, p, mode, id, pos, extra = {}) => ({ name, type: 'n8n-nodes-base.webhook', typeVersion: 2.1, position: pos, webhookId: id,
   parameters: { httpMethod: method, path: p, responseMode: mode, options: {}, ...extra } });
@@ -112,12 +112,12 @@ const reader = wf('paperReadDocs001', 'Paperwork Reader Â· 1 Read documents', 
   getAll('Get papers', T.papers, at(2)),
   getAll('Get quotes', T.quotes, at(3)),
   code('Prepare AI', file('prepare.js'), at(4)),
-  claude('Claude reads the document', at(5)),
+  aiCall('AI reads the document', at(5)),
   code('Check', file('check.js'), at(6)),
   insert('Save papers', T.papers, at(7)),
   code('File rows', S['file-rows'], at(8)),
   insert('Save files', T.files, at(9)),
-], [...chain('Upload', 'One item per file', 'Get papers', 'Get quotes', 'Prepare AI', 'Claude reads the document', 'Check', 'Save papers', 'File rows', 'Save files')]);
+], [...chain('Upload', 'One item per file', 'Get papers', 'Get quotes', 'Prepare AI', 'AI reads the document', 'Check', 'Save papers', 'File rows', 'Save files')]);
 
 // ---------- 2. Pages ----------
 const pages = wf('paperReadPages01', 'Paperwork Reader Â· 2 Pages', [

@@ -1,4 +1,4 @@
-// Reads Claude's answer for each document and runs the checks in plain code, so they're exact:
+// Reads the AI's answer for each document and runs the checks in plain code, so they're exact:
 // does the math add up, have we seen this invoice before, does it match the quote, is anything missing.
 // Then it writes the agent's note in Sam's voice and decides the status.
 const files = $('One item per file').all().map((i) => i.json);
