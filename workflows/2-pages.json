@@ -1,0 +1,561 @@
+{
+  "id": "paperReadPages01",
+  "name": "Paperwork Reader Â· 2 Pages",
+  "active": false,
+  "nodes": [
+    {
+      "name": "Paperwork page",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "7b2e3d4f-5a6b-4c70-8d91-a3b4c5d6e720",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "papers",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f2b56643-ffa5-4219-bc5f-cd1c4d9b4e79"
+    },
+    {
+      "name": "Get papers for page",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Paperwork docs"
+        },
+        "matchType": "anyCondition",
+        "filters": {},
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "be465e25-9000-43a6-8c65-c6c072ad02fc"
+    },
+    {
+      "name": "Render paperwork",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const CFG = {\"business\":\"Northlight Studio\",\"ownerName\":\"Sam\",\"currency\":\"USD\",\"testMode\":true,\"aiModel\":\"claude-opus-5-5\"};\n// Shared helpers, added to the top of every Code node by build.js. CFG comes from config.json.\nconst today = (typeof $now !== 'undefined' && $now && $now.toISODate) ? $now.toISODate() : new Date().toISOString().slice(0, 10);\nconst nowIso = new Date().toISOString();\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\nconst isDate = (s) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || ''));\nconst toUTC = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };\nconst daysBetween = (a, b) => Math.round((toUTC(b) - toUTC(a)) / 86400000); // b - a\nconst fmtDate = (s) => (isDate(String(s).slice(0, 10)) ? `${MONTHS[Number(String(s).slice(5, 7)) - 1]} ${Number(String(s).slice(8, 10))}` : '');\nconst num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\nconst round2 = (n) => Math.round(num(n) * 100) / 100;\nconst money = (n, cur, exact = true) => {\n  const v = num(n);\n  const digits = exact && Math.round(v * 100) % 100 !== 0 ? 2 : 0;\n  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || CFG.currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v); }\n  catch { return (cur || '') + ' ' + v.toFixed(digits); }\n};\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst parseJson = (s, fallback) => { try { const v = JSON.parse(s); return v ?? fallback; } catch { return fallback; } };\nconst norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');\nconst words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\\s+/).filter((w) => w.length > 2);\nconst sameSupplier = (a, b) => {\n  const x = words(a).filter((w) => !['inc', 'llc', 'ltd', 'gmbh', 'the', 'and', 'company'].includes(w));\n  const y = words(b);\n  return norm(a) === norm(b) || (x.length > 0 && x[0] === y[0]);\n};\n\n// What each status and check is called on screen, and the stamp that goes on the document.\nconst STATUS = {\n  ready: { label: 'Ready to pay', stamp: 'READY TO PAY', ink: 'blue' },\n  filed: { label: 'Paid, filed', stamp: 'FILED', ink: 'blue' },\n  needs_you: { label: 'Needs you', stamp: 'CHECK THIS', ink: 'red' },\n  approved: { label: 'Approved', stamp: 'APPROVED', ink: 'blue' },\n  rejected: { label: 'Not paying', stamp: 'NOT PAYING', ink: 'red' },\n  unreadable: { label: \"Couldn't read\", stamp: 'UNREADABLE', ink: 'red' },\n};\nconst FLAG_STAMP = { duplicate: 'DUPLICATE', over_quote: 'OVER QUOTE', math: \"DOESN'T ADD UP\", missing: 'MISSING INFO', unsure: 'CHECK THIS', unreadable: 'UNREADABLE' };\n\n// Shared look for the pages: green ledger paper, a dark desk the documents sit on, and rubber stamps.\nconst FONTS = 'https://fonts.googleapis.com/css2?family=Anton&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap';\nconst BASE_CSS = `\n:root{--paper:#EDF2EC;--sheet:#F9FBF8;--rule:#CCDBC8;--rule-2:#9FBC99;--ink:#13201B;--muted:#56685F;\n--desk:#1B362F;--desk-2:#132923;--desk-3:#24463D;--desk-ink:#E6EFEA;--desk-muted:#9BB4AA;\n--red:#C2303A;--blue:#2A49AC;--hl:#F4E35E;--ok:#1D7A4C;\n--f:\"Schibsted Grotesk\",\"Segoe UI\",system-ui,sans-serif;--stamp:\"Anton\",\"Impact\",sans-serif}\n*{box-sizing:border-box}\nhtml{-webkit-text-size-adjust:100%}\nbody{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}\na{color:inherit}\nbutton,input{font:inherit;color:inherit}\n:focus-visible{outline:2px solid var(--hl);outline-offset:3px;border-radius:4px}\n.wrap{max-width:1240px;margin:0 auto;padding:0 28px}\nh1,h2,h3{margin:0;letter-spacing:-.02em;line-height:1.08}\np{margin:0}\n\n.bar{background:var(--desk-2);color:var(--desk-ink)}\n.bar .wrap{display:flex;align-items:center;gap:18px;height:62px}\n.brand{display:flex;align-items:center;gap:11px;text-decoration:none;font-weight:800;font-size:17px;letter-spacing:-.01em}\n.brand svg{width:28px;height:28px}\n.brand small{font-weight:500;color:var(--desk-muted);font-size:14px;margin-left:4px}\n.bar .grow{flex:1}\n.chip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--desk-muted);border:1px solid var(--desk-3);border-radius:999px;padding:5px 12px}\n.chip i{width:7px;height:7px;border-radius:50%;background:var(--hl)}\n.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:10px;padding:12px 20px;font-weight:700;font-size:15px;cursor:pointer;text-decoration:none;transition:transform .12s ease,background .15s}\n.btn:active{transform:translateY(1px)}\n.btn.light{background:var(--desk-ink);color:var(--desk-2)}\n.btn.light:hover{background:#fff}\n.btn.ghost{background:transparent;color:var(--desk-ink);border:1px solid var(--desk-3)}\n.btn.ghost:hover{border-color:var(--desk-muted)}\n.btn.blue{background:var(--blue);color:#fff}\n.btn.blue:hover{background:#2340a0}\n.btn.red-line{background:transparent;color:var(--red);border:1.5px solid color-mix(in srgb,var(--red) 45%,transparent)}\n.btn.red-line:hover{border-color:var(--red)}\n.btn[disabled]{opacity:.55;cursor:default}\n.bar .btn{padding:8px 14px;font-size:14px}\n\n.stamp{--c:var(--red);--r:-7deg;display:inline-block;font-family:var(--stamp);font-weight:400;letter-spacing:.07em;line-height:1;color:var(--c);\n  border:3px solid var(--c);outline:1.5px solid var(--c);outline-offset:3px;border-radius:5px;padding:7px 12px 6px;white-space:nowrap;\n  transform:rotate(var(--r));filter:url(#ink);opacity:.9;text-transform:uppercase}\n.stamp.blue{--c:var(--blue)}\n.stamp.sm{font-size:13px;border-width:2px;outline-width:1px;outline-offset:2px;padding:4px 7px 3px;border-radius:4px;filter:url(#ink-sm);opacity:.95}\n.stamp.thud{animation:thud .5s cubic-bezier(.2,.9,.25,1) both}\n@keyframes thud{0%{opacity:0;transform:rotate(var(--r)) scale(2.6)}55%{opacity:.95;transform:rotate(var(--r)) scale(.93)}100%{opacity:.9;transform:rotate(var(--r)) scale(1)}}\n.flash{background:var(--hl);color:var(--ink);font-weight:600;padding:12px 16px;border-radius:10px;display:flex;gap:10px;align-items:center}\n@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}\n.bar .short{display:none}\n@media (max-width:640px){.wrap{padding:0 16px}.bar .chip{display:none}.brand small{display:none}.bar .long{display:none}.bar .short{display:inline}}\n`;\n// Roughens the stamp edges and knocks a few specks out of the ink, like a real rubber stamp.\nconst INK_SVG = `<svg width=\"0\" height=\"0\" style=\"position:absolute\" aria-hidden=\"true\"><filter id=\"ink\" x=\"-10%\" y=\"-20%\" width=\"120%\" height=\"140%\">\n<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.9\" numOctaves=\"2\" seed=\"4\" result=\"n\"/><feDisplacementMap in=\"SourceGraphic\" in2=\"n\" scale=\"2.4\" result=\"d\"/>\n<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.42\" numOctaves=\"2\" seed=\"11\" result=\"m\"/>\n<feColorMatrix in=\"m\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2 1.72\" result=\"mask\"/><feComposite in=\"d\" in2=\"mask\" operator=\"in\"/></filter>\n<filter id=\"ink-sm\" x=\"-10%\" y=\"-20%\" width=\"120%\" height=\"140%\"><feTurbulence type=\"fractalNoise\" baseFrequency=\"1.1\" numOctaves=\"1\" seed=\"4\" result=\"n\"/><feDisplacementMap in=\"SourceGraphic\" in2=\"n\" scale=\"1.2\" result=\"d\"/>\n<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.6\" numOctaves=\"1\" seed=\"2\" result=\"m\"/><feColorMatrix in=\"m\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.5\" result=\"mask\"/><feComposite in=\"d\" in2=\"mask\" operator=\"in\"/></filter></svg>`;\nconst MARK = `<svg viewBox=\"0 0 28 28\" aria-hidden=\"true\"><rect x=\"7\" y=\"3\" width=\"15\" height=\"19\" rx=\"2\" fill=\"#2E554A\"/><rect x=\"4\" y=\"6\" width=\"15\" height=\"19\" rx=\"2\" fill=\"#E6EFEA\"/>\n<path d=\"M7.5 11h8M7.5 14h8M7.5 17h5\" stroke=\"#9BB4AA\" stroke-width=\"1.4\" stroke-linecap=\"round\"/><circle cx=\"20\" cy=\"20\" r=\"5.2\" fill=\"none\" stroke=\"#F4E35E\" stroke-width=\"2\"/><path d=\"M17.8 20.1l1.5 1.5 2.9-3\" fill=\"none\" stroke=\"#F4E35E\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>`;\nconst head = (title, extraCss = '') => `<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>${esc(title)}</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"stylesheet\" href=\"${FONTS}\"><style>${BASE_CSS}${extraCss}</style></head><body>${INK_SVG}`;\nconst topBar = () => `<header class=\"bar\"><div class=\"wrap\"><a class=\"brand\" href=\"/webhook/papers\">${MARK}Paperwork Reader<small>for ${esc(CFG.business)}</small></a><span class=\"grow\"></span>\n<span class=\"chip\"><i></i>Demo mode, nothing gets paid from here</span><a class=\"btn ghost\" href=\"/webhook/papers-export\"><span class=\"long\">Export for your accountant</span><span class=\"short\">Export</span></a></div></header>`;\nconst stamp = (text, ink, rot, cls = '') => `<span class=\"stamp ${ink === 'blue' ? 'blue' : ''} ${cls}\" style=\"--r:${rot}deg\">${esc(text)}</span>`;\nconst flagsOf = (p) => parseJson(p.flags, []);\n// The stamp a document gets: its worst problem when it needs you, otherwise its status.\nconst mainStamp = (p) => {\n  const f = flagsOf(p);\n  if (p.status === 'needs_you' && f.length) return { text: FLAG_STAMP[f[0].kind] || 'CHECK THIS', ink: 'red' };\n  const s = STATUS[p.status] || STATUS.needs_you;\n  return { text: s.stamp, ink: s.ink };\n};\n// \"$589.91 and €249.90\" when there's more than one currency.\nconst sumByCurrency = (rows, field = 'total') => {\n  const by = {};\n  rows.forEach((r) => { const c = r.currency || CFG.currency; by[c] = (by[c] || 0) + num(r[field]); });\n  const keys = Object.keys(by).sort((a, b) => (a === CFG.currency ? -1 : b === CFG.currency ? 1 : 0));\n  return keys.length ? keys.map((c) => money(by[c], c)).join(' and ') : money(0);\n};\nconst typeLabel = (p) => ({ invoice: 'Invoice', receipt: 'Receipt', credit_note: 'Credit note', quote: 'Quote' }[p.doc_type] || 'Document');\n\n// The main page: drop tray and tallies on the desk, then the ledger of everything that was read.\nconst papers = $('Get papers for page').all().map((i) => i.json).filter((p) => p.doc_id)\n  .sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at)));\nconst q = ($('Paperwork page').first().json.query) || {};\nconst latest = papers.filter((p) => p.batch !== 'seed').map((p) => p.batch).sort().pop();\nconst fresh = q.new === '1' && latest ? papers.filter((p) => p.batch === latest) : [];\nconst freshIds = new Set(fresh.map((p) => p.doc_id));\n\nconst needs = papers.filter((p) => p.status === 'needs_you' || p.status === 'unreadable');\nconst ready = papers.filter((p) => p.status === 'ready');\nconst done = papers.filter((p) => ['approved', 'filed', 'rejected'].includes(p.status));\nconst caught = papers.reduce((s, p) => s + ((p.currency || CFG.currency) === CFG.currency ? num(p.saved) : 0), 0);\nconst caughtCount = papers.filter((p) => num(p.saved) > 0).length;\n\nlet banner = '';\nif (fresh.length) {\n  const n = fresh.filter((p) => p.status === 'needs_you' || p.status === 'unreadable').length;\n  banner = `Done, I read ${fresh.length} document${fresh.length > 1 ? 's' : ''}${n ? ` and ${n} of them need${n === 1 ? 's' : ''} you, so they're at the top` : ' and everything checks out'}`;\n} else if (q.done === 'reset') banner = 'The demo is back to the start, so you can drop the sample documents in again';\n\nconst CSS = `\n.desk{background:radial-gradient(1200px 500px at 20% 0%,#21423A 0%,var(--desk) 55%,var(--desk-2) 100%);color:var(--desk-ink);padding:40px 0 46px}\n.desk-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:28px;align-items:start}\n.tray{position:relative;border:2px dashed #3D6357;border-radius:18px;padding:34px;min-height:330px;display:grid;transition:border-color .2s,background .2s;background:rgba(0,0,0,.08)}\n.tray.over{border-color:var(--hl);background:rgba(244,227,94,.06)}\n.tray-empty{display:grid;grid-template-columns:auto 1fr;gap:30px;align-items:center}\n.pile{width:150px;height:170px;position:relative}\n.pile i{position:absolute;inset:0;background:#F4F7F2;border-radius:4px;box-shadow:0 10px 24px rgba(0,0,0,.35)}\n.pile i:nth-child(1){transform:rotate(-9deg) translate(-8px,6px);background:#DCE5DD}\n.pile i:nth-child(2){transform:rotate(5deg) translate(10px,2px);background:#E9EFE8}\n.pile i:nth-child(3){padding:18px 16px;display:grid;gap:7px;align-content:start}\n.pile i:nth-child(3) b{display:block;height:6px;border-radius:3px;background:#C9D6CB}\n.pile i:nth-child(3) b:first-child{width:55%;height:9px;background:#9DB3A4}\n.pile .stamp{position:absolute;right:-18px;bottom:22px;font-size:15px;background:transparent}\n.tray h1{font-size:clamp(28px,3.4vw,42px);font-weight:800;letter-spacing:-.035em;max-width:15ch}\n.tray p{color:var(--desk-muted);margin:14px 0 24px;max-width:48ch;font-size:16px}\n.tray-files{display:none;align-content:start;gap:18px}\n.tray.has-files .tray-empty{display:none}\n.tray.has-files .tray-files{display:grid}\n.tray-files h2{font-size:22px;font-weight:800}\n.tray-files .sub{color:var(--desk-muted);margin-top:4px;font-size:14.5px}\n.queue{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:12px}\n.queue li{background:var(--desk-2);border:1px solid var(--desk-3);border-radius:12px;padding:8px;display:grid;gap:8px;min-width:0}\n.thumb{position:relative;height:132px;border-radius:6px;overflow:hidden;background:#E9EFE8;display:grid;place-items:center}\n.thumb img{width:100%;height:100%;object-fit:cover;object-position:top}\n.thumb .pdf{font-family:var(--stamp);letter-spacing:.08em;color:var(--desk-3);font-size:26px}\n.queue .nm{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.queue .st{font-size:12.5px;color:var(--desk-muted);min-height:1.5em}\n.tray-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}\n.tray-actions .link{background:none;border:0;color:var(--desk-muted);text-decoration:underline;cursor:pointer;padding:8px}\n.beam{position:absolute;left:0;right:0;height:38%;top:-40%;background:linear-gradient(180deg,transparent,rgba(244,227,94,.0) 20%,rgba(244,227,94,.55) 92%,var(--hl));mix-blend-mode:multiply;display:none}\n.tray.reading .beam{display:block;animation:scan 1.6s cubic-bezier(.45,0,.55,1) infinite;animation-delay:var(--d)}\n.tray.reading .st{color:var(--hl)}\n@keyframes scan{0%{top:-40%}100%{top:105%}}\n\n.tally{display:grid;gap:0;border-radius:18px;background:var(--desk-2);border:1px solid var(--desk-3);overflow:hidden}\n.t-row{padding:20px 24px;border-bottom:1px solid var(--desk-3);display:grid;gap:2px}\n.t-row .lab{color:var(--desk-muted);font-size:14px;display:flex;justify-content:space-between;gap:10px}\n.t-row .val{font-size:30px;font-weight:800;letter-spacing:-.03em;line-height:1.15}\n.t-row.needs .val{color:#FF8F8F}\n.t-row.caught{border-bottom:0;background:var(--hl);color:var(--ink);padding-top:26px;padding-bottom:24px}\n.t-row.caught .lab{color:#5C5420}\n.t-row.caught .val{font-size:clamp(40px,4.4vw,56px);letter-spacing:-.045em}\n.t-row.caught small{font-size:13.5px;color:#5C5420}\n\n.flashwrap{margin-top:-22px;position:relative}\n.ledger{padding:34px 0 30px}\n.group{margin-bottom:34px}\n.g-head{display:flex;align-items:baseline;gap:14px;padding:0 4px 10px;border-bottom:2px solid var(--ink)}\n.g-head h2{font-size:22px;font-weight:800}\n.g-head .ct{color:var(--muted);font-size:14.5px}\n.g-head .sum{margin-left:auto;font-weight:700}\n.rows{background:var(--sheet);border:1px solid var(--rule);border-top:0;border-radius:0 0 12px 12px;overflow:hidden}\n.row{display:grid;grid-template-columns:150px minmax(0,1.6fr) 130px 96px 96px 130px 22px;align-items:center;gap:14px;padding:13px 16px;text-decoration:none;border-bottom:1px solid var(--rule);position:relative}\n.row:last-child{border-bottom:0}\n.row:hover{background:#F1F6EF}\n.row .who b{display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.row .who span{display:block;color:var(--muted);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.row .ref,.row .dt{font-size:13.5px;color:var(--muted)}\n.row .amt{text-align:right;font-weight:700;font-size:16px;border-left:1px solid var(--rule-2);padding-left:14px;align-self:stretch;display:flex;align-items:center;justify-content:flex-end}\n.row .go{color:var(--rule-2)}\n.row:hover .go{color:var(--ink)}\n.row.fresh{animation:glow 2.4s ease both;animation-delay:var(--d)}\n@keyframes glow{0%,30%{background:color-mix(in srgb,var(--hl) 55%,var(--sheet))}100%{background:var(--sheet)}}\n.cols{display:grid;grid-template-columns:150px minmax(0,1.6fr) 130px 96px 96px 130px 22px;gap:14px;padding:12px 16px 6px;font-size:12.5px;color:var(--muted)}\n.cols span:nth-child(6){text-align:right}\n.empty{padding:22px 18px;color:var(--muted)}\nfooter{border-top:1px solid var(--rule);padding:22px 0 40px;color:var(--muted);font-size:14px}\nfooter .wrap{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}\nfooter button{background:none;border:1px solid var(--rule-2);border-radius:8px;padding:8px 14px;cursor:pointer;color:var(--ink)}\n@media (max-width:980px){.desk-grid{grid-template-columns:1fr}}\n@media (max-width:860px){.cols{display:none}.row{grid-template-columns:auto minmax(0,1fr) auto;row-gap:4px}.row .ref,.row .dt,.row .go{display:none}.row .amt{border:0;padding:0}}\n@media (max-width:560px){.tray{padding:22px}.tray-empty{grid-template-columns:1fr}.pile{width:110px;height:125px}.row{grid-template-columns:minmax(0,1fr) auto}.row .st-col{grid-column:1/-1}}\n`;\n\nconst rowHtml = (p, i) => {\n  const s = mainStamp(p);\n  const isFresh = freshIds.has(p.doc_id);\n  const order = isFresh ? fresh.findIndex((f) => f.doc_id === p.doc_id) : 0;\n  const delay = `${0.25 + order * 0.32}s`;\n  const due = p.due_date ? fmtDate(p.due_date) : p.doc_type === 'receipt' ? 'Paid' : '';\n  return `<a class=\"row ${isFresh ? 'fresh' : ''}\" style=\"--d:${delay}\" href=\"/webhook/papers-doc?id=${encodeURIComponent(p.doc_id)}\">\n  <span class=\"st-col\">${stamp(s.text, s.ink, i % 2 ? 3 : -4, `sm ${isFresh ? 'thud' : ''}`).replace('style=\"', `style=\"animation-delay:${delay};`)}</span>\n  <span class=\"who\"><b>${esc(p.supplier || p.file_name)}</b><span>${esc(p.summary || p.agent_note)}</span></span>\n  <span class=\"ref\">${esc(p.invoice_number || '')}</span><span class=\"dt\">${fmtDate(p.uploaded_at)}</span><span class=\"dt\">${esc(due)}</span>\n  <span class=\"amt\">${p.total ? money(p.total, p.currency) : ''}</span><span class=\"go\" aria-hidden=\"true\">›</span></a>`;\n};\nconst group = (title, list, emptyText, showSum = true) => `<section class=\"group\"><div class=\"g-head\"><h2>${title}</h2><span class=\"ct\">${list.length} document${list.length === 1 ? '' : 's'}</span>\n  ${showSum && list.length ? `<span class=\"sum\">${sumByCurrency(list)}</span>` : ''}</div>\n  <div class=\"rows\">${list.length ? list.map(rowHtml).join('') : `<p class=\"empty\">${emptyText}</p>`}</div></section>`;\n\nconst html = `${head('Paperwork Reader', CSS)}${topBar()}\n<section class=\"desk\"><div class=\"wrap desk-grid\">\n  <form class=\"tray\" id=\"tray\" method=\"post\" action=\"/webhook/papers-upload\" enctype=\"multipart/form-data\">\n    <input type=\"file\" name=\"files\" id=\"files\" multiple accept=\".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*\" hidden>\n    <div class=\"tray-empty\">\n      <div class=\"pile\" aria-hidden=\"true\"><i></i><i></i><i><b></b><b></b><b></b><b></b><b></b></i>${stamp('CHECKED', 'blue', -12)}</div>\n      <div><h1>Drop your invoices and receipts here</h1>\n      <p>PDFs, scans or photos straight from your phone, and I'll read every one and check it before anything gets paid.</p>\n      <label for=\"files\" class=\"btn light\" tabindex=\"0\">Choose files</label></div>\n    </div>\n    <div class=\"tray-files\">\n      <div><h2 id=\"trayTitle\">Ready to read</h2><p class=\"sub\" id=\"traySub\">Have a look, and when you're happy I'll go through them one by one.</p></div>\n      <ul class=\"queue\" id=\"queue\"></ul>\n      <div class=\"tray-actions\"><button class=\"btn light\" id=\"readBtn\" type=\"submit\">Read them</button><button class=\"link\" type=\"button\" id=\"clearBtn\">Clear</button></div>\n    </div>\n  </form>\n  <aside class=\"tally\" aria-label=\"Totals\">\n    <div class=\"t-row\"><span class=\"lab\"><span>Ready to pay</span><span>${ready.length}</span></span><span class=\"val\">${sumByCurrency(ready)}</span></div>\n    <div class=\"t-row needs\"><span class=\"lab\"><span>Needs you</span><span>${needs.length}</span></span><span class=\"val\">${sumByCurrency(needs)}</span></div>\n    <div class=\"t-row caught\"><span class=\"lab\"><span>Caught before you paid it</span></span><span class=\"val\">${money(caught)}</span>\n      <small>${caughtCount ? `Duplicates, overcharges and wrong totals across ${caughtCount} document${caughtCount > 1 ? 's' : ''}` : \"Duplicates and overcharges show up here when I find them\"}</small></div>\n  </aside>\n</div></section>\n${banner ? `<div class=\"wrap flashwrap\"><div class=\"flash\" role=\"status\">${esc(banner)}</div></div>` : ''}\n<main class=\"wrap ledger\">\n  <div class=\"cols\" aria-hidden=\"true\"><span>Status</span><span>From</span><span>Number</span><span>Received</span><span>Due</span><span>Amount</span><span></span></div>\n  ${group('Needs you', needs, \"Nothing needs you right now, everything that came in checks out.\")}\n  ${group('Ready to pay', ready, 'Nothing waiting to be paid at the moment.')}\n  ${group('Done', done, 'Approved invoices and filed receipts end up here.', false)}\n</main>\n<footer><div class=\"wrap\"><span>Demo mode, so nothing gets paid from here, it only reads and checks.</span>\n<form method=\"post\" action=\"/webhook/papers-reset\" onsubmit=\"return confirm('Start the demo over? This clears everything you added.')\"><button type=\"submit\">Reset demo data</button></form></div></footer>\n<script>\n(function () {\n  var tray = document.getElementById('tray'), input = document.getElementById('files'), queue = document.getElementById('queue');\n  var readBtn = document.getElementById('readBtn');\n  function size(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }\n  function show() {\n    var files = Array.prototype.slice.call(input.files || []);\n    queue.innerHTML = '';\n    tray.classList.toggle('has-files', files.length > 0);\n    readBtn.textContent = 'Read ' + (files.length === 1 ? 'this document' : 'these ' + files.length + ' documents');\n    files.forEach(function (f, i) {\n      var li = document.createElement('li');\n      li.innerHTML = '<div class=\"thumb\"><span class=\"pdf\">PDF</span><div class=\"beam\" style=\"--d:' + (i * 0.22) + 's\"></div></div><div class=\"nm\"></div><div class=\"st\"></div>';\n      li.querySelector('.nm').textContent = f.name;\n      li.querySelector('.st').textContent = size(f.size);\n      if (/^image\\\\//.test(f.type)) {\n        var r = new FileReader();\n        r.onload = function () { var img = new Image(); img.src = r.result; img.alt = ''; var t = li.querySelector('.thumb'); t.replaceChild(img, t.querySelector('.pdf')); };\n        r.readAsDataURL(f);\n      }\n      queue.appendChild(li);\n    });\n  }\n  input.addEventListener('change', show);\n  document.getElementById('clearBtn').addEventListener('click', function () { input.value = ''; show(); });\n  document.querySelector('label[for=files]').addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });\n  ['dragenter', 'dragover'].forEach(function (ev) { document.addEventListener(ev, function (e) { e.preventDefault(); tray.classList.add('over'); }); });\n  ['dragleave', 'drop'].forEach(function (ev) { document.addEventListener(ev, function (e) { e.preventDefault(); if (ev === 'drop' || e.target === document.documentElement) tray.classList.remove('over'); }); });\n  document.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files.length) { input.files = e.dataTransfer.files; show(); } });\n  var STEPS = ['Reading it', 'Checking the math', 'Looking for duplicates', 'Comparing with your quotes'];\n  tray.addEventListener('submit', function (e) {\n    if (!input.files || !input.files.length) { e.preventDefault(); return; }\n    tray.classList.add('reading');\n    document.getElementById('trayTitle').textContent = 'Reading your paperwork';\n    document.getElementById('traySub').textContent = 'It takes a few seconds per document, and I check the math, look for duplicates and compare each one with your quotes.';\n    var sts = queue.querySelectorAll('.st'), k = 0;\n    sts.forEach(function (s, i) { s.textContent = STEPS[0]; });\n    setInterval(function () { k++; sts.forEach(function (s, i) { s.textContent = STEPS[(k + i) % STEPS.length]; }); }, 1400);\n    setTimeout(function () { readBtn.disabled = true; readBtn.textContent = 'Reading…'; document.getElementById('clearBtn').disabled = true; }, 0);\n  });\n  if (/[?&](new|done)=/.test(location.search) && history.replaceState) history.replaceState(null, '', location.pathname);\n})();\n</script></body></html>`;\nreturn [{ json: { html } }];\n"
+      },
+      "id": "cea19ef9-9f7a-4262-94a8-86c3aa90194c"
+    },
+    {
+      "name": "Send page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b7e1041b-601e-4755-9af1-ca4b9aeaa599"
+    },
+    {
+      "name": "Document page",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "7b2e3d4f-5a6b-4c70-8d91-a3b4c5d6e721",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "papers-doc",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "19da04b3-3593-4f54-a29a-a077bada5c09"
+    },
+    {
+      "name": "Get papers for doc",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Paperwork docs"
+        },
+        "matchType": "anyCondition",
+        "filters": {},
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "203d28ef-668d-4611-8ad3-58414106fcfc"
+    },
+    {
+      "name": "Get file",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Paperwork files"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doc_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Document page').first().json.query.id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "459535e8-d561-4dbf-85ed-f935e5b00b5a"
+    },
+    {
+      "name": "Render document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const CFG = {\"business\":\"Northlight Studio\",\"ownerName\":\"Sam\",\"currency\":\"USD\",\"testMode\":true,\"aiModel\":\"claude-opus-5-5\"};\n// Shared helpers, added to the top of every Code node by build.js. CFG comes from config.json.\nconst today = (typeof $now !== 'undefined' && $now && $now.toISODate) ? $now.toISODate() : new Date().toISOString().slice(0, 10);\nconst nowIso = new Date().toISOString();\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\nconst isDate = (s) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || ''));\nconst toUTC = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };\nconst daysBetween = (a, b) => Math.round((toUTC(b) - toUTC(a)) / 86400000); // b - a\nconst fmtDate = (s) => (isDate(String(s).slice(0, 10)) ? `${MONTHS[Number(String(s).slice(5, 7)) - 1]} ${Number(String(s).slice(8, 10))}` : '');\nconst num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\nconst round2 = (n) => Math.round(num(n) * 100) / 100;\nconst money = (n, cur, exact = true) => {\n  const v = num(n);\n  const digits = exact && Math.round(v * 100) % 100 !== 0 ? 2 : 0;\n  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || CFG.currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v); }\n  catch { return (cur || '') + ' ' + v.toFixed(digits); }\n};\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst parseJson = (s, fallback) => { try { const v = JSON.parse(s); return v ?? fallback; } catch { return fallback; } };\nconst norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');\nconst words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\\s+/).filter((w) => w.length > 2);\nconst sameSupplier = (a, b) => {\n  const x = words(a).filter((w) => !['inc', 'llc', 'ltd', 'gmbh', 'the', 'and', 'company'].includes(w));\n  const y = words(b);\n  return norm(a) === norm(b) || (x.length > 0 && x[0] === y[0]);\n};\n\n// What each status and check is called on screen, and the stamp that goes on the document.\nconst STATUS = {\n  ready: { label: 'Ready to pay', stamp: 'READY TO PAY', ink: 'blue' },\n  filed: { label: 'Paid, filed', stamp: 'FILED', ink: 'blue' },\n  needs_you: { label: 'Needs you', stamp: 'CHECK THIS', ink: 'red' },\n  approved: { label: 'Approved', stamp: 'APPROVED', ink: 'blue' },\n  rejected: { label: 'Not paying', stamp: 'NOT PAYING', ink: 'red' },\n  unreadable: { label: \"Couldn't read\", stamp: 'UNREADABLE', ink: 'red' },\n};\nconst FLAG_STAMP = { duplicate: 'DUPLICATE', over_quote: 'OVER QUOTE', math: \"DOESN'T ADD UP\", missing: 'MISSING INFO', unsure: 'CHECK THIS', unreadable: 'UNREADABLE' };\n\n// Shared look for the pages: green ledger paper, a dark desk the documents sit on, and rubber stamps.\nconst FONTS = 'https://fonts.googleapis.com/css2?family=Anton&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap';\nconst BASE_CSS = `\n:root{--paper:#EDF2EC;--sheet:#F9FBF8;--rule:#CCDBC8;--rule-2:#9FBC99;--ink:#13201B;--muted:#56685F;\n--desk:#1B362F;--desk-2:#132923;--desk-3:#24463D;--desk-ink:#E6EFEA;--desk-muted:#9BB4AA;\n--red:#C2303A;--blue:#2A49AC;--hl:#F4E35E;--ok:#1D7A4C;\n--f:\"Schibsted Grotesk\",\"Segoe UI\",system-ui,sans-serif;--stamp:\"Anton\",\"Impact\",sans-serif}\n*{box-sizing:border-box}\nhtml{-webkit-text-size-adjust:100%}\nbody{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}\na{color:inherit}\nbutton,input{font:inherit;color:inherit}\n:focus-visible{outline:2px solid var(--hl);outline-offset:3px;border-radius:4px}\n.wrap{max-width:1240px;margin:0 auto;padding:0 28px}\nh1,h2,h3{margin:0;letter-spacing:-.02em;line-height:1.08}\np{margin:0}\n\n.bar{background:var(--desk-2);color:var(--desk-ink)}\n.bar .wrap{display:flex;align-items:center;gap:18px;height:62px}\n.brand{display:flex;align-items:center;gap:11px;text-decoration:none;font-weight:800;font-size:17px;letter-spacing:-.01em}\n.brand svg{width:28px;height:28px}\n.brand small{font-weight:500;color:var(--desk-muted);font-size:14px;margin-left:4px}\n.bar .grow{flex:1}\n.chip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--desk-muted);border:1px solid var(--desk-3);border-radius:999px;padding:5px 12px}\n.chip i{width:7px;height:7px;border-radius:50%;background:var(--hl)}\n.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:10px;padding:12px 20px;font-weight:700;font-size:15px;cursor:pointer;text-decoration:none;transition:transform .12s ease,background .15s}\n.btn:active{transform:translateY(1px)}\n.btn.light{background:var(--desk-ink);color:var(--desk-2)}\n.btn.light:hover{background:#fff}\n.btn.ghost{background:transparent;color:var(--desk-ink);border:1px solid var(--desk-3)}\n.btn.ghost:hover{border-color:var(--desk-muted)}\n.btn.blue{background:var(--blue);color:#fff}\n.btn.blue:hover{background:#2340a0}\n.btn.red-line{background:transparent;color:var(--red);border:1.5px solid color-mix(in srgb,var(--red) 45%,transparent)}\n.btn.red-line:hover{border-color:var(--red)}\n.btn[disabled]{opacity:.55;cursor:default}\n.bar .btn{padding:8px 14px;font-size:14px}\n\n.stamp{--c:var(--red);--r:-7deg;display:inline-block;font-family:var(--stamp);font-weight:400;letter-spacing:.07em;line-height:1;color:var(--c);\n  border:3px solid var(--c);outline:1.5px solid var(--c);outline-offset:3px;border-radius:5px;padding:7px 12px 6px;white-space:nowrap;\n  transform:rotate(var(--r));filter:url(#ink);opacity:.9;text-transform:uppercase}\n.stamp.blue{--c:var(--blue)}\n.stamp.sm{font-size:13px;border-width:2px;outline-width:1px;outline-offset:2px;padding:4px 7px 3px;border-radius:4px;filter:url(#ink-sm);opacity:.95}\n.stamp.thud{animation:thud .5s cubic-bezier(.2,.9,.25,1) both}\n@keyframes thud{0%{opacity:0;transform:rotate(var(--r)) scale(2.6)}55%{opacity:.95;transform:rotate(var(--r)) scale(.93)}100%{opacity:.9;transform:rotate(var(--r)) scale(1)}}\n.flash{background:var(--hl);color:var(--ink);font-weight:600;padding:12px 16px;border-radius:10px;display:flex;gap:10px;align-items:center}\n@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}\n.bar .short{display:none}\n@media (max-width:640px){.wrap{padding:0 16px}.bar .chip{display:none}.brand small{display:none}.bar .long{display:none}.bar .short{display:inline}}\n`;\n// Roughens the stamp edges and knocks a few specks out of the ink, like a real rubber stamp.\nconst INK_SVG = `<svg width=\"0\" height=\"0\" style=\"position:absolute\" aria-hidden=\"true\"><filter id=\"ink\" x=\"-10%\" y=\"-20%\" width=\"120%\" height=\"140%\">\n<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.9\" numOctaves=\"2\" seed=\"4\" result=\"n\"/><feDisplacementMap in=\"SourceGraphic\" in2=\"n\" scale=\"2.4\" result=\"d\"/>\n<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.42\" numOctaves=\"2\" seed=\"11\" result=\"m\"/>\n<feColorMatrix in=\"m\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2 1.72\" result=\"mask\"/><feComposite in=\"d\" in2=\"mask\" operator=\"in\"/></filter>\n<filter id=\"ink-sm\" x=\"-10%\" y=\"-20%\" width=\"120%\" height=\"140%\"><feTurbulence type=\"fractalNoise\" baseFrequency=\"1.1\" numOctaves=\"1\" seed=\"4\" result=\"n\"/><feDisplacementMap in=\"SourceGraphic\" in2=\"n\" scale=\"1.2\" result=\"d\"/>\n<feTurbulence type=\"fractalNoise\" baseFrequency=\"0.6\" numOctaves=\"1\" seed=\"2\" result=\"m\"/><feColorMatrix in=\"m\" type=\"matrix\" values=\"0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.5\" result=\"mask\"/><feComposite in=\"d\" in2=\"mask\" operator=\"in\"/></filter></svg>`;\nconst MARK = `<svg viewBox=\"0 0 28 28\" aria-hidden=\"true\"><rect x=\"7\" y=\"3\" width=\"15\" height=\"19\" rx=\"2\" fill=\"#2E554A\"/><rect x=\"4\" y=\"6\" width=\"15\" height=\"19\" rx=\"2\" fill=\"#E6EFEA\"/>\n<path d=\"M7.5 11h8M7.5 14h8M7.5 17h5\" stroke=\"#9BB4AA\" stroke-width=\"1.4\" stroke-linecap=\"round\"/><circle cx=\"20\" cy=\"20\" r=\"5.2\" fill=\"none\" stroke=\"#F4E35E\" stroke-width=\"2\"/><path d=\"M17.8 20.1l1.5 1.5 2.9-3\" fill=\"none\" stroke=\"#F4E35E\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>`;\nconst head = (title, extraCss = '') => `<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>${esc(title)}</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"stylesheet\" href=\"${FONTS}\"><style>${BASE_CSS}${extraCss}</style></head><body>${INK_SVG}`;\nconst topBar = () => `<header class=\"bar\"><div class=\"wrap\"><a class=\"brand\" href=\"/webhook/papers\">${MARK}Paperwork Reader<small>for ${esc(CFG.business)}</small></a><span class=\"grow\"></span>\n<span class=\"chip\"><i></i>Demo mode, nothing gets paid from here</span><a class=\"btn ghost\" href=\"/webhook/papers-export\"><span class=\"long\">Export for your accountant</span><span class=\"short\">Export</span></a></div></header>`;\nconst stamp = (text, ink, rot, cls = '') => `<span class=\"stamp ${ink === 'blue' ? 'blue' : ''} ${cls}\" style=\"--r:${rot}deg\">${esc(text)}</span>`;\nconst flagsOf = (p) => parseJson(p.flags, []);\n// The stamp a document gets: its worst problem when it needs you, otherwise its status.\nconst mainStamp = (p) => {\n  const f = flagsOf(p);\n  if (p.status === 'needs_you' && f.length) return { text: FLAG_STAMP[f[0].kind] || 'CHECK THIS', ink: 'red' };\n  const s = STATUS[p.status] || STATUS.needs_you;\n  return { text: s.stamp, ink: s.ink };\n};\n// \"$589.91 and €249.90\" when there's more than one currency.\nconst sumByCurrency = (rows, field = 'total') => {\n  const by = {};\n  rows.forEach((r) => { const c = r.currency || CFG.currency; by[c] = (by[c] || 0) + num(r[field]); });\n  const keys = Object.keys(by).sort((a, b) => (a === CFG.currency ? -1 : b === CFG.currency ? 1 : 0));\n  return keys.length ? keys.map((c) => money(by[c], c)).join(' and ') : money(0);\n};\nconst typeLabel = (p) => ({ invoice: 'Invoice', receipt: 'Receipt', credit_note: 'Credit note', quote: 'Quote' }[p.doc_type] || 'Document');\n\n// One document: the original on the desk with its stamps, and everything the agent read and checked next to it.\nconst q = ($('Document page').first().json.query) || {};\nconst p = $('Get papers for doc').all().map((i) => i.json).find((r) => r.doc_id === q.id);\nconst file = $('Get file').all().map((i) => i.json).find((r) => r.doc_id === q.id);\n\nif (!p) {\n  const html = `${head('Not found')}${topBar()}<main class=\"wrap\" style=\"padding:60px 28px\"><h1>I couldn't find that document</h1>\n  <p style=\"margin:14px 0 22px;color:var(--muted)\">It might have been cleared when the demo was reset.</p><a class=\"btn blue\" href=\"/webhook/papers\">Back to all paperwork</a></main></body></html>`;\n  return [{ json: { html } }];\n}\n\nconst flags = flagsOf(p);\nconst conf = parseJson(p.confidence, {});\nconst lines = parseJson(p.lines, []);\nconst cur = p.currency || CFG.currency;\nconst m = (n) => money(n, cur);\nconst has = (k) => flags.some((f) => f.kind === k);\nconst flag = (k) => flags.find((f) => f.kind === k);\nconst justDecided = q.done === 'approve' || q.done === 'reject';\n\n// Stamps on the document: up to two problems, or the status.\nlet stamps = flags.filter((f) => FLAG_STAMP[f.kind]).slice(0, 2).map((f) => ({ text: FLAG_STAMP[f.kind], ink: 'red' }));\nif (p.status === 'approved' || p.status === 'rejected' || !stamps.length) { const s = STATUS[p.status] || STATUS.needs_you; stamps = [{ text: s.stamp, ink: s.ink }]; }\nconst STAMP_POS = [{ top: '7%', right: '6%', r: -9 }, { top: '27%', right: '12%', r: 5 }];\nconst stampHtml = stamps.map((s, i) => `<div class=\"on-doc\" style=\"top:${STAMP_POS[i].top};right:${STAMP_POS[i].right}\">${stamp(s.text, s.ink, STAMP_POS[i].r, 'big thud').replace('style=\"', `style=\"animation-delay:${0.45 + i * 0.4}s;`)}</div>`).join('');\n\nlet viewer;\nif (!file) viewer = `<div class=\"nofile\">The original isn't stored for this one.</div>`;\nelse if (file.mime === 'application/pdf') viewer = `<canvas id=\"pdf\" class=\"sheet\" aria-label=\"The original PDF\"></canvas><script type=\"application/octet-stream\" id=\"pdfdata\">${file.data}</script><div class=\"nofile\" id=\"pdffail\" hidden>The PDF can't be shown here, but it was read fine.</div>`;\nelse viewer = `<img class=\"sheet\" alt=\"The original ${esc(typeLabel(p).toLowerCase())} from ${esc(p.supplier)}\" src=\"data:${esc(file.mime)};base64,${file.data}\">`;\n\nconst check = (ok, title, detail, link = '') => `<li class=\"${ok === true ? 'pass' : ok === false ? 'fail' : 'na'}\"><span class=\"ic\" aria-hidden=\"true\">${ok === true ? '✓' : ok === false ? '!' : '–'}</span><div><b>${esc(title)}</b>${detail ? `<p>${esc(detail)}</p>` : ''}${link}</div></li>`;\nconst dupRef = flag('duplicate')?.ref;\nconst dupLink = dupRef ? `<a class=\"see\" href=\"/webhook/papers-doc?id=${encodeURIComponent(dupRef)}\">Open the first one</a>` : '';\nconst isReceipt = p.doc_type === 'receipt';\nconst checks = p.status === 'unreadable' ? check(false, \"Couldn't read it\", flag('unreadable')?.detail) : [\n  check(!has('math'), has('math') ? \"The numbers don't add up\" : 'The numbers add up', flag('math')?.detail),\n  check(!has('duplicate'), has('duplicate') ? 'Already received before' : 'Not paid before', flag('duplicate')?.detail, dupLink),\n  p.quote_used ? check(!has('over_quote'), has('over_quote') ? flag('over_quote').title : `Matches quote ${p.quote_used}`, flag('over_quote')?.detail)\n    : check(null, isReceipt ? 'No quote needed for a receipt' : 'No quote on file to compare with', ''),\n  check(!(has('missing') || has('unsure')), has('missing') || has('unsure') ? 'Something needs a second look' : 'Nothing missing', [flag('missing')?.detail, flag('unsure')?.detail].filter(Boolean).join('. ')),\n].join('');\n\nconst field = (label, value, key) => {\n  const c = conf[key];\n  const v = value ? esc(value) : '<span class=\"none\">Not on it</span>';\n  return `<div><dt>${label}</dt><dd>${c === 'low' && value ? `<mark>${v}</mark><small>hard to read</small>` : v}</dd></div>`;\n};\nconst daysLeft = p.due_date ? daysBetween(today, p.due_date) : null;\nconst dueText = isReceipt ? `Paid${p.payment ? ` with ${esc(p.payment)}` : ''}` : p.due_date\n  ? `Due ${fmtDate(p.due_date)}${daysLeft > 1 ? `, in ${daysLeft} days` : daysLeft === 1 ? ', tomorrow' : daysLeft === 0 ? ', today' : `, ${-daysLeft} days ago`}` : 'No due date on it';\n\nconst lineRows = lines.map((l) => `<tr><td>${esc(l.description)}${l.original_description ? `<small class=\"orig\">${esc(l.original_description)}</small>` : ''}</td><td class=\"r\">${l.quantity || ''}</td>\n  <td class=\"r\">${l.unit_price ? m(l.unit_price) : ''}${l.agreed ? `<small class=\"agreed\">quoted ${m(l.agreed)}</small>` : ''}</td><td class=\"r\">${m(l.amount)}</td></tr>`).join('');\n\nconst decidedOn = p.decided_at ? fmtDate(p.decided_at) : '';\nlet actions;\nif (p.status === 'approved') actions = `<p class=\"decided\">You approved this for payment${decidedOn ? ` on ${decidedOn}` : ''}.</p><button class=\"btn red-line\" name=\"action\" value=\"undo\">Undo</button>`;\nelse if (p.status === 'rejected') actions = `<p class=\"decided\">You marked this as not paying${decidedOn ? ` on ${decidedOn}` : ''}.</p><button class=\"btn red-line\" name=\"action\" value=\"undo\">Undo</button>`;\nelse if (p.status === 'filed') actions = `<p class=\"decided\">Filed for your records, nothing to pay.</p>`;\nelse actions = `<button class=\"btn blue\" name=\"action\" value=\"approve\">Approve for payment</button><button class=\"btn red-line\" name=\"action\" value=\"reject\">Don't pay this</button>`;\n\nconst tone = p.status === 'needs_you' || p.status === 'unreadable' || p.status === 'rejected' ? 'red' : 'blue';\nconst CSS = `\n.crumb{padding:16px 0 0}.crumb a{color:var(--muted);text-decoration:none;font-size:14.5px}.crumb a:hover{color:var(--ink)}\n.doc{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:0;margin:14px auto 50px;max-width:1240px;border-radius:20px;overflow:clip;border:1px solid var(--rule)}\n.viewer{background:radial-gradient(900px 600px at 30% 10%,#244A40 0%,var(--desk) 50%,var(--desk-2) 100%);padding:44px 40px;display:grid;place-items:start center;position:relative}\n.sheet-wrap{position:sticky;top:24px;width:100%;max-width:580px}\n.sheet{display:block;width:100%;height:auto;border-radius:3px;box-shadow:0 2px 4px rgba(0,0,0,.25),0 28px 50px -12px rgba(0,0,0,.6);background:#fff}\n.on-doc{position:absolute;pointer-events:none}\n.stamp.big{font-size:clamp(22px,2.6vw,34px);border-width:4px;outline-width:2px;outline-offset:4px;padding:10px 16px 8px;mix-blend-mode:multiply;background:rgba(255,255,255,.04)}\n.viewer .fname{color:var(--desk-muted);font-size:13px;margin-top:14px;text-align:center}\n.nofile{color:var(--desk-muted);padding:80px 20px;text-align:center}\n.facts{background:var(--sheet);padding:38px 40px;display:grid;gap:26px;align-content:start}\n.kind{color:var(--muted);font-size:14.5px}\n.facts h1{font-size:clamp(30px,3vw,42px);font-weight:800;letter-spacing:-.035em;margin-top:4px}\n.summary{color:var(--muted);margin-top:8px;font-size:16px}\n.amount{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:16px 0}\n.amount .big{font-size:44px;font-weight:800;letter-spacing:-.04em;line-height:1}\n.amount .due{color:var(--muted)}\n.note{border-left:4px solid var(--blue);padding:4px 0 4px 18px}\n.note.red{border-color:var(--red)}\n.note b{font-size:13.5px;color:var(--muted);font-weight:600}\n.note p{font-size:17.5px;line-height:1.5;margin-top:4px;max-width:54ch}\n.checks{list-style:none;margin:0;padding:0;display:grid;gap:2px}\n.checks li{display:grid;grid-template-columns:28px 1fr;gap:12px;padding:10px 0;border-bottom:1px dashed var(--rule)}\n.checks li:last-child{border-bottom:0}\n.checks .ic{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;color:#fff;background:var(--ok)}\n.checks .fail .ic{background:var(--red)}\n.checks .na .ic{background:var(--rule-2)}\n.checks b{font-weight:700}\n.checks p{color:var(--muted);font-size:14px;margin-top:2px}\n.checks .see{display:inline-block;margin-top:6px;font-size:14px;font-weight:600;color:var(--blue)}\nh2.sec{font-size:15px;font-weight:700;margin-bottom:10px}\n.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 18px;margin:0}\n.fields dt{font-size:13px;color:var(--muted)}\n.fields dd{margin:2px 0 0;font-weight:600;overflow-wrap:anywhere}\n.fields mark{background:linear-gradient(transparent 12%,var(--hl) 12%,var(--hl) 88%,transparent 88%);padding:0 3px}\n.fields small{display:block;font-weight:500;font-size:12px;color:#8A7A10}\n.fields .none{color:var(--muted);font-weight:400}\ntable{width:100%;border-collapse:collapse;font-size:14.5px}\nth{text-align:left;font-weight:600;color:var(--muted);font-size:13px;padding:6px 8px 8px 0;border-bottom:1.5px solid var(--ink)}\ntd{padding:10px 8px 10px 0;border-bottom:1px solid var(--rule);vertical-align:top}\n.r{text-align:right}\ntd small{display:block;font-size:12.5px}\n.orig{color:var(--muted);font-style:italic}\n.agreed{color:var(--red);font-weight:700}\ntfoot td{border-bottom:0;padding-top:6px;padding-bottom:4px;color:var(--muted)}\ntfoot tr:last-child td{color:var(--ink);font-weight:800;font-size:16px;border-top:1.5px solid var(--ink);padding-top:10px}\n.actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding-top:6px}\n.decided{width:100%;color:var(--muted)}\n@media (max-width:960px){.doc{grid-template-columns:1fr;border-radius:0;border-left:0;border-right:0}.viewer{padding:28px 18px}.facts{padding:28px 20px}.fields{grid-template-columns:repeat(2,minmax(0,1fr))}}\n`;\n\nconst html = `${head(`${p.supplier || p.file_name} · Paperwork Reader`, CSS)}${topBar()}\n<div class=\"wrap crumb\"><a href=\"/webhook/papers\">← All paperwork</a></div>\n<main class=\"doc\">\n  <section class=\"viewer\"><div class=\"sheet-wrap\">${viewer}${stampHtml}</div></section>\n  <section class=\"facts\">\n    <div><p class=\"kind\">${typeLabel(p)}${p.invoice_number ? ` ${esc(p.invoice_number)}` : ''}${p.language && !/english/i.test(p.language) ? `, translated from ${esc(p.language)}` : ''}</p>\n      <h1>${esc(p.supplier || p.file_name)}</h1>${p.summary ? `<p class=\"summary\">${esc(p.summary)}</p>` : ''}</div>\n    <div class=\"amount\"><span class=\"big\">${p.total ? m(p.total) : '–'}</span><span class=\"due\">${dueText}</span></div>\n    <div class=\"note ${tone}\"><b>What I found</b><p>${esc(p.agent_note)}</p></div>\n    <div><h2 class=\"sec\">Checks</h2><ul class=\"checks\">${checks}</ul></div>\n    ${p.status === 'unreadable' ? '' : `<div><h2 class=\"sec\">What I read</h2><dl class=\"fields\">\n      ${field('From', p.supplier, 'supplier')}${field(isReceipt ? 'Receipt number' : 'Invoice number', p.invoice_number, 'invoice_number')}${field('Issued', fmtDate(p.issue_date) ? `${fmtDate(p.issue_date)}, ${p.issue_date.slice(0, 4)}` : '', 'issue_date')}\n      ${isReceipt ? field('Paid with', p.payment, '') : field('Due', fmtDate(p.due_date) ? `${fmtDate(p.due_date)}, ${p.due_date.slice(0, 4)}` : '', 'due_date')}${field('Quote or order', p.quote_ref, '')}${field('Language', p.language, '')}\n    </dl></div>\n    <div><h2 class=\"sec\">Lines</h2><table><thead><tr><th>Item</th><th class=\"r\">Qty</th><th class=\"r\">Price</th><th class=\"r\">Amount</th></tr></thead><tbody>${lineRows}</tbody>\n      <tfoot><tr><td colspan=\"3\">Subtotal</td><td class=\"r\">${m(p.subtotal)}</td></tr><tr><td colspan=\"3\">${esc(p.tax_label || 'Tax')}</td><td class=\"r\">${m(p.tax)}</td></tr><tr><td colspan=\"3\">Total</td><td class=\"r\">${m(p.total)}</td></tr></tfoot></table></div>`}\n    <form class=\"actions\" method=\"post\" action=\"/webhook/papers-action\"><input type=\"hidden\" name=\"id\" value=\"${esc(p.doc_id)}\">${actions}</form>\n  </section>\n</main>\n${file && file.mime === 'application/pdf' ? `<script src=\"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js\"></script>\n<script>\n(function () {\n  var c = document.getElementById('pdf'), fail = document.getElementById('pdffail');\n  function bad() { c.hidden = true; fail.hidden = false; }\n  try {\n    var lib = window.pdfjsLib; if (!lib) return bad();\n    lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';\n    var raw = atob(document.getElementById('pdfdata').textContent.trim()), bytes = new Uint8Array(raw.length);\n    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);\n    lib.getDocument({ data: bytes, isEvalSupported: false }).promise.then(function (pdf) { return pdf.getPage(1); }).then(function (page) {\n      var w = c.parentNode.clientWidth, v1 = page.getViewport({ scale: 1 }), dpr = Math.min(window.devicePixelRatio || 1, 2);\n      var v = page.getViewport({ scale: (w / v1.width) * dpr });\n      c.width = v.width; c.height = v.height; c.style.width = w + 'px';\n      return page.render({ canvasContext: c.getContext('2d'), viewport: v }).promise;\n    }).catch(bad);\n  } catch (e) { bad(); }\n})();\n</script>` : ''}\n${justDecided ? `<script>history.replaceState&&history.replaceState(null,'',location.pathname+'?id=${encodeURIComponent(p.doc_id)}')</script>` : ''}\n</body></html>`;\nreturn [{ json: { html } }];\n"
+      },
+      "id": "ad314562-f9a3-4113-8c67-9c00f08bcf7b"
+    },
+    {
+      "name": "Send document",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "70a0948a-fdba-4b39-82fe-3ac81cbe92e6"
+    },
+    {
+      "name": "Document action",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        400
+      ],
+      "webhookId": "7b2e3d4f-5a6b-4c70-8d91-a3b4c5d6e722",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "papers-action",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "af19542b-eb62-4a89-a862-d6f434565e38"
+    },
+    {
+      "name": "Get papers for action",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Paperwork docs"
+        },
+        "matchType": "anyCondition",
+        "filters": {},
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "5da066df-1e90-4301-8817-e200508d9ea9"
+    },
+    {
+      "name": "Apply action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const CFG = {\"business\":\"Northlight Studio\",\"ownerName\":\"Sam\",\"currency\":\"USD\",\"testMode\":true,\"aiModel\":\"claude-opus-5-5\"};\n// Shared helpers, added to the top of every Code node by build.js. CFG comes from config.json.\nconst today = (typeof $now !== 'undefined' && $now && $now.toISODate) ? $now.toISODate() : new Date().toISOString().slice(0, 10);\nconst nowIso = new Date().toISOString();\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\nconst isDate = (s) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || ''));\nconst toUTC = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };\nconst daysBetween = (a, b) => Math.round((toUTC(b) - toUTC(a)) / 86400000); // b - a\nconst fmtDate = (s) => (isDate(String(s).slice(0, 10)) ? `${MONTHS[Number(String(s).slice(5, 7)) - 1]} ${Number(String(s).slice(8, 10))}` : '');\nconst num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\nconst round2 = (n) => Math.round(num(n) * 100) / 100;\nconst money = (n, cur, exact = true) => {\n  const v = num(n);\n  const digits = exact && Math.round(v * 100) % 100 !== 0 ? 2 : 0;\n  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || CFG.currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v); }\n  catch { return (cur || '') + ' ' + v.toFixed(digits); }\n};\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst parseJson = (s, fallback) => { try { const v = JSON.parse(s); return v ?? fallback; } catch { return fallback; } };\nconst norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');\nconst words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\\s+/).filter((w) => w.length > 2);\nconst sameSupplier = (a, b) => {\n  const x = words(a).filter((w) => !['inc', 'llc', 'ltd', 'gmbh', 'the', 'and', 'company'].includes(w));\n  const y = words(b);\n  return norm(a) === norm(b) || (x.length > 0 && x[0] === y[0]);\n};\n\n// What each status and check is called on screen, and the stamp that goes on the document.\nconst STATUS = {\n  ready: { label: 'Ready to pay', stamp: 'READY TO PAY', ink: 'blue' },\n  filed: { label: 'Paid, filed', stamp: 'FILED', ink: 'blue' },\n  needs_you: { label: 'Needs you', stamp: 'CHECK THIS', ink: 'red' },\n  approved: { label: 'Approved', stamp: 'APPROVED', ink: 'blue' },\n  rejected: { label: 'Not paying', stamp: 'NOT PAYING', ink: 'red' },\n  unreadable: { label: \"Couldn't read\", stamp: 'UNREADABLE', ink: 'red' },\n};\nconst FLAG_STAMP = { duplicate: 'DUPLICATE', over_quote: 'OVER QUOTE', math: \"DOESN'T ADD UP\", missing: 'MISSING INFO', unsure: 'CHECK THIS', unreadable: 'UNREADABLE' };\n\n// Approve, don't pay, or undo. Undo puts the document back where the checks left it.\nconst body = $('Document action').first().json.body || {};\nconst p = $('Get papers for action').all().map((i) => i.json).find((r) => r.doc_id === body.id);\nif (!p) return [];\nconst back = parseJson(p.flags, []).length ? 'needs_you' : (p.doc_type === 'receipt' ? 'filed' : 'ready');\nconst status = body.action === 'approve' ? 'approved' : body.action === 'reject' ? 'rejected' : back;\nreturn [{ json: { doc_id: p.doc_id, status, decided_at: body.action === 'undo' ? '' : nowIso } }];\n\n"
+      },
+      "id": "078934fb-da41-4022-a4c9-116d83037fcf"
+    },
+    {
+      "name": "Update paper",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        400
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Paperwork docs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doc_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.doc_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "3a9e6ac9-195c-4d47-9fb1-d741cc065f91"
+    },
+    {
+      "name": "Back to document",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        400
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Redirectingâ€¦",
+        "options": {
+          "responseCode": 303,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Location",
+                "value": "=/webhook/papers-doc?id={{ $('Apply action').first().json.doc_id }}&done={{ $('Document action').first().json.body.action }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "2d9d6f05-0214-4be2-ac99-b1f080dc965d"
+    },
+    {
+      "name": "Export",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        600
+      ],
+      "webhookId": "7b2e3d4f-5a6b-4c70-8d91-a3b4c5d6e723",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "papers-export",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "87f1d4dd-3fd1-44d0-85be-a2cc92aa4f1f"
+    },
+    {
+      "name": "Get papers for export",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        600
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Paperwork docs"
+        },
+        "matchType": "anyCondition",
+        "filters": {},
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "id": "924ffbb7-dc0e-4d16-a338-629564980652"
+    },
+    {
+      "name": "Build CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        600
+      ],
+      "parameters": {
+        "jsCode": "const CFG = {\"business\":\"Northlight Studio\",\"ownerName\":\"Sam\",\"currency\":\"USD\",\"testMode\":true,\"aiModel\":\"claude-opus-5-5\"};\n// Shared helpers, added to the top of every Code node by build.js. CFG comes from config.json.\nconst today = (typeof $now !== 'undefined' && $now && $now.toISODate) ? $now.toISODate() : new Date().toISOString().slice(0, 10);\nconst nowIso = new Date().toISOString();\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\nconst isDate = (s) => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(s || ''));\nconst toUTC = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };\nconst daysBetween = (a, b) => Math.round((toUTC(b) - toUTC(a)) / 86400000); // b - a\nconst fmtDate = (s) => (isDate(String(s).slice(0, 10)) ? `${MONTHS[Number(String(s).slice(5, 7)) - 1]} ${Number(String(s).slice(8, 10))}` : '');\nconst num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };\nconst round2 = (n) => Math.round(num(n) * 100) / 100;\nconst money = (n, cur, exact = true) => {\n  const v = num(n);\n  const digits = exact && Math.round(v * 100) % 100 !== 0 ? 2 : 0;\n  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || CFG.currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v); }\n  catch { return (cur || '') + ' ' + v.toFixed(digits); }\n};\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst parseJson = (s, fallback) => { try { const v = JSON.parse(s); return v ?? fallback; } catch { return fallback; } };\nconst norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');\nconst words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\\s+/).filter((w) => w.length > 2);\nconst sameSupplier = (a, b) => {\n  const x = words(a).filter((w) => !['inc', 'llc', 'ltd', 'gmbh', 'the', 'and', 'company'].includes(w));\n  const y = words(b);\n  return norm(a) === norm(b) || (x.length > 0 && x[0] === y[0]);\n};\n\n// What each status and check is called on screen, and the stamp that goes on the document.\nconst STATUS = {\n  ready: { label: 'Ready to pay', stamp: 'READY TO PAY', ink: 'blue' },\n  filed: { label: 'Paid, filed', stamp: 'FILED', ink: 'blue' },\n  needs_you: { label: 'Needs you', stamp: 'CHECK THIS', ink: 'red' },\n  approved: { label: 'Approved', stamp: 'APPROVED', ink: 'blue' },\n  rejected: { label: 'Not paying', stamp: 'NOT PAYING', ink: 'red' },\n  unreadable: { label: \"Couldn't read\", stamp: 'UNREADABLE', ink: 'red' },\n};\nconst FLAG_STAMP = { duplicate: 'DUPLICATE', over_quote: 'OVER QUOTE', math: \"DOESN'T ADD UP\", missing: 'MISSING INFO', unsure: 'CHECK THIS', unreadable: 'UNREADABLE' };\n\n// Everything in a CSV the accountant can drop into their software.\nconst rows = $('Get papers for export').all().map((i) => i.json).filter((p) => p.doc_id)\n  .sort((a, b) => String(a.issue_date || a.uploaded_at).localeCompare(String(b.issue_date || b.uploaded_at)));\nconst cell = (v) => { const s = String(v ?? ''); return /[\",\\n]/.test(s) ? `\"${s.replace(/\"/g, '\"\"')}\"` : s; };\nconst head = ['Issue date', 'Supplier', 'Type', 'Number', 'Due date', 'Currency', 'Subtotal', 'Tax', 'Total', 'Status', 'Quote or order', 'What it was for', 'Agent note'];\nconst lines = rows.map((p) => [p.issue_date, p.supplier, p.doc_type, p.invoice_number, p.due_date, p.currency, num(p.subtotal).toFixed(2), num(p.tax).toFixed(2),\n  num(p.total).toFixed(2), (STATUS[p.status] || {}).label || p.status, p.quote_ref, p.summary, p.agent_note].map(cell).join(','));\nreturn [{ json: { csv: '﻿' + [head.join(','), ...lines].join('\\r\\n'), name: `paperwork-${today}.csv` } }];\n"
+      },
+      "id": "46f5ddd1-c900-4177-83fc-4a1297f0bf58"
+    },
+    {
+      "name": "Send CSV",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        720,
+        600
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.csv }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/csv; charset=utf-8"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "=attachment; filename=\"{{ $json.name }}\""
+              }
+            ]
+          }
+        }
+      },
+      "id": "f5be0835-0e7a-4ed0-8730-e314eeaa0ac1"
+    }
+  ],
+  "connections": {
+    "Paperwork page": {
+      "main": [
+        [
+          {
+            "node": "Get papers for page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get papers for page": {
+      "main": [
+        [
+          {
+            "node": "Render paperwork",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render paperwork": {
+      "main": [
+        [
+          {
+            "node": "Send page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document page": {
+      "main": [
+        [
+          {
+            "node": "Get papers for doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get papers for doc": {
+      "main": [
+        [
+          {
+            "node": "Get file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get file": {
+      "main": [
+        [
+          {
+            "node": "Render document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render document": {
+      "main": [
+        [
+          {
+            "node": "Send document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document action": {
+      "main": [
+        [
+          {
+            "node": "Get papers for action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get papers for action": {
+      "main": [
+        [
+          {
+            "node": "Apply action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply action": {
+      "main": [
+        [
+          {
+            "node": "Update paper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update paper": {
+      "main": [
+        [
+          {
+            "node": "Back to document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export": {
+      "main": [
+        [
+          {
+            "node": "Get papers for export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get papers for export": {
+      "main": [
+        [
+          {
+            "node": "Build CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CSV": {
+      "main": [
+        [
+          {
+            "node": "Send CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
